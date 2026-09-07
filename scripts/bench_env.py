@@ -100,8 +100,10 @@ def main() -> None:
     ap.add_argument("--steps", type=int, default=300, help="env steps to time")
     ap.add_argument("--updates", type=int, default=200, help="optimiser steps to time")
     ap.add_argument("--batch", type=int, default=128)
-    ap.add_argument("--episode-len", type=int, default=1001,
-                    help="steps per Reacher episode, for the projection")
+    ap.add_argument("--episode-len", type=int, default=None,
+                    help="steps per episode for the projection; measured if omitted, "
+                         "since Tennis episodes end when the ball drops and lengthen "
+                         "as the agents improve")
     ap.add_argument("--update-every", type=int, default=20)
     ap.add_argument("--updates-per-cycle", type=int, default=10)
     ap.add_argument("--exe", default=None)

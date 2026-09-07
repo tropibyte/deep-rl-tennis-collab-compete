@@ -152,7 +152,7 @@ def main() -> None:
     ap.add_argument("--out-dir", default="results",
                     help="where summary.json is written")
     ap.add_argument("--assets", default="assets", help="where figures are written")
-    ap.add_argument("--baseline", default="ddpg")
+    ap.add_argument("--baseline", default="maddpg")
     ap.add_argument("--cap", type=int, default=None,
                     help="episodes to rank unsolved runs at; defaults to the longest run")
     args = ap.parse_args()
@@ -176,7 +176,7 @@ def main() -> None:
         best = max(baseline_runs,
                    key=lambda r: (r["solved"], -(r["solved_episode"] or cap)))
         learning_curve(best, assets / "learning_curve.png",
-                       title=f"DDPG on Reacher (20 agents) — seed {best['seed']}")
+                       title=f"MADDPG on Tennis (2 agents) — seed {best['seed']}")
         print(f"  learning_curve.png <- {best['tag']}")
         if len(baseline_runs) > 1:
             seed_band(baseline_runs, assets / "baseline_seeds.png",

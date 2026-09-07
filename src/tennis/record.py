@@ -61,7 +61,7 @@ def _find_unity_window(timeout: float = 25.0):
             title = ctypes.create_unicode_buffer(256)
             user32.GetWindowTextW(hwnd, title, 256)
             if ("UnityWndClass" in cls.value
-                    or "Reacher" in title.value
+                    or "Tennis" in title.value
                     or "Unity Environment" in title.value):
                 found.append(hwnd)
             return True
@@ -244,7 +244,7 @@ def record_gif(
                 "grab at its coordinates would capture whatever is on top of "
                 "it instead. Windows blocks SetForegroundWindow from a "
                 "background process and fails silently.\n\n"
-                "Click the Reacher window once to focus it, then re-run. "
+                "Click the Tennis window once to focus it, then re-run. "
                 "Nothing was captured."
             )
         print(f"capturing region {box} (window confirmed foreground)")
@@ -293,7 +293,7 @@ def record_gif(
                             raise RuntimeError(
                                 f"Focus did not return within 30s ({len(frames)} "
                                 "frames captured). Nothing is written. Re-run and "
-                                "leave the Reacher window in front."
+                                "leave the Tennis window in front."
                             )
                         _paused_notice[0] = False
                         print("  focus regained, resuming capture", flush=True)
