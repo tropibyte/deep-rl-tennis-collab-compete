@@ -1,0 +1,41 @@
+# Unity environment binaries -- download separately, see README
+Tennis_Windows_x86_64/
+Tennis_Linux/
+Tennis.app/
+Tennis_Linux_NoVis/
+*.zip
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.ipynb_checkpoints/
+
+# Run artifacts (checkpoints + headline results are committed selectively)
+results/**/raw/
+*.log
+unity-environment.log
+
+# per-run scratch working directories (Unity log isolation)
+results/**/_runs/
+
+# bench + study scratch
+results/_bench_run/
+results/_random_run/
+results/smoke/
+
+# Ablation checkpoints are large and numerous; the headline ones are committed
+checkpoints/ablation/
+results/_record_run/
+assets/frames/
+
+# scratch checkpoints from pre-study diagnostics
+results/diag/*.pt
+results/clip/*.pt
+
+# capture review artifacts (frames dir already ignored)
+assets/review_sheet.png
+assets/contact_sheet.png

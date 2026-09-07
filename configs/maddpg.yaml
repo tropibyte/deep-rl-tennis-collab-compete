@@ -1,0 +1,55 @@
+# Baseline: shared-policy MADDPG -- one actor driving both rackets, with a
+# centralised critic that sees both agents' observations and actions.
+#
+# The centralised critic is the point. Each agent's environment includes the
+# other agent's changing policy, so a critic seeing only its own agent is
+# regressing on a moving target it cannot explain. ddpg_decentralised is the arm
+# that measures whether that matters here.
+#
+# Layer normalisation is inherited from the Reacher project, where it was the
+# difference between solving and mostly dying: raw Unity observations are not
+# scaled for a network, and an unnormalised actor saturates its tanh.
+name: maddpg
+algo: ddpg
+seed: 0
+
+shared_policy: true
+centralised_critic: true
+
+episodes: 2500
+max_steps: 1000
+update_every: 1
+updates_per_cycle: 1
+learn_start: 1024
+
+buffer_size: 1000000
+batch_size: 256
+gamma: 0.99
+tau: 0.01
+lr_actor: 0.0001
+lr_critic: 0.001
+weight_decay: 0.0
+n_step: 1
+
+grad_clip_critic: 1.0
+grad_clip_actor: null
+
+hidden_actor: [256, 128]
+hidden_critic: [256, 128]
+norm: layer
+input_norm: none
+
+noise:
+  kind: ou
+  sigma: 0.2
+  sigma_min: 0.01
+  sigma_decay: 0.999
+  theta: 0.15
+  mu: 0.0
+
+per:
+  enabled: false
+
+score_reduce: max
+solve_score: 0.5
+solve_window: 100
