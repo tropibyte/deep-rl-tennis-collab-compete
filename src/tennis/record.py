@@ -1,11 +1,11 @@
 """Record a GIF of a trained policy driving the arms.
 
-The vector-observation Reacher build returns no visual observations, so there
+The vector-observation Tennis build returns no visual observations, so there
 are no frames to pull out of the environment. The only way to film it is to run
 the Unity window with graphics enabled and screen-capture its client area.
 
 That makes this a privacy problem as much as a graphics one. Screen capture
-sees whatever is on the screen, and on the Navigation project it twice caught
+sees whatever is on the screen, and on the earlier projects it repeatedly caught
 personal content -- a notification toast, and an editor window behind a client
 rectangle that was measured while the player was still resizing itself. The
 mitigations below are deliberate, and ``--frames-dir`` exists so every frame can
@@ -29,6 +29,13 @@ _IS_WINDOWS = sys.platform.startswith("win")
 # 11 toast is ~360px, and losing a slice of the frame is a far better outcome
 # than publishing someone's notifications.
 TOAST_ZONE_PX = 480
+
+# How far a frame's mean brightness may drift from the reference measured
+# during warm-up before it is treated as something other than the scene.
+# The court is a static background, so the honest variation is small.
+OCCLUSION_TOLERANCE = 18.0
+# Consecutive non-matching frames tolerated before giving up entirely.
+MAX_OCCLUDED = 40
 
 
 def _time_left(deadline: float) -> float:
@@ -141,6 +148,42 @@ def _find_unity_window(timeout: float = 25.0):
     return None
 
 
+def client_box(hwnd):
+    """The window's client rectangle in screen coordinates, measured *now*.
+
+    Measured fresh for every frame rather than once at startup. A rectangle
+    taken at launch goes stale the moment the window moves, and the grab then
+    lands on whatever is behind it -- which produced a recording that was mostly
+    an unrelated text window with a small patch of the actual scene offset
+    inside it. Re-measuring follows the window instead of assuming it stayed put.
+
+    Returns None if the window is gone or has no area.
+    """
+    if not _IS_WINDOWS:
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    if not user32.IsWindow(hwnd) or not user32.IsWindowVisible(hwnd):
+        return None
+
+    rect = wintypes.RECT()
+    user32.GetClientRect(hwnd, ctypes.byref(rect))
+    wr = wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(wr))
+    pt = wintypes.POINT(0, 0)
+    user32.ClientToScreen(hwnd, ctypes.byref(pt))
+
+    w = min(rect.right, wr.right - wr.left)
+    h = min(rect.bottom, wr.bottom - wr.top)
+    right = min(pt.x + w, user32.GetSystemMetrics(0) - TOAST_ZONE_PX)
+    bottom = pt.y + h
+    if right <= pt.x or bottom <= pt.y:
+        return None
+    return (pt.x, pt.y, right, bottom)
+
+
 def is_foreground(hwnd) -> bool:
     """True if ``hwnd`` is the window the user is actually looking at.
 
@@ -154,12 +197,34 @@ def is_foreground(hwnd) -> bool:
     contents of somebody's editor, chat window or inbox, and it has now happened
     on two projects. So every capture is gated on this check rather than on the
     assumption that raising the window worked.
+
+    The test is "does the foreground window belong to the same *process* as the
+    one we are filming", not "is it the exact same handle". A Unity player can
+    own more than one top-level window, and the one that receives focus need not
+    be the one whose client rectangle we measured -- an exact-handle test then
+    reports a focus loss while the player is plainly in front, which is what it
+    did here. Process identity is the property that actually matters: it
+    guarantees nothing else is covering the capture region.
     """
     if not _IS_WINDOWS:
         return True
     import ctypes
+    from ctypes import wintypes
 
-    return ctypes.windll.user32.GetForegroundWindow() == hwnd
+    user32 = ctypes.windll.user32
+    fg = user32.GetForegroundWindow()
+    if fg == hwnd:
+        return True
+    if not fg:
+        return False
+
+    def pid_of(h) -> int:
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(h, ctypes.byref(pid))
+        return pid.value
+
+    ours = pid_of(hwnd)
+    return bool(ours) and pid_of(fg) == ours
 
 
 def _wait_for_foreground(hwnd, timeout: float = 10.0) -> bool:
@@ -198,7 +263,7 @@ def record_gif(
 
     from .agent import Agent
     from .config import Config
-    from .env import ReacherEnv
+    from .env import TennisEnv
 
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -214,7 +279,7 @@ def record_gif(
     # nothing is being trained, but the build's inference configuration steps
     # far slower, and the rendered frames are identical either way. Only the
     # wall-clock pacing differs, and playback fps is set here regardless.
-    with ReacherEnv(exe_path=env_path, no_graphics=False, seed=0, train_mode=True,
+    with TennisEnv(exe_path=env_path, no_graphics=False, seed=0, train_mode=True,
                     run_dir=Path("results/_record_run")) as env:
         agent = Agent(env.state_size, env.action_size, env.num_agents, cfg)
         agent.load(checkpoint)
@@ -257,6 +322,7 @@ def record_gif(
         time.sleep(warmup_sec)
         prev_mean = None
         for _ in range(40):
+            box = client_box(hwnd) or box
             probe = np.asarray(ImageGrab.grab(bbox=box, all_screens=True).convert("L"),
                                dtype=np.float32)
             m = float(probe.mean())
@@ -266,6 +332,20 @@ def record_gif(
             prev_mean = m
             time.sleep(0.25)
         print(f"  warm-up complete (scene brightness {prev_mean:.0f})")
+        # Say clearly when the quiet period starts and roughly how long it runs.
+        # A silent warm-up looks finished, and the window gets clicked away.
+        print("")
+        print("  >>> RECORDING NOW - do not click anything until this finishes <<<")
+        print("      (about 60-90 seconds; it will say when it is done)", flush=True)
+
+        box = client_box(hwnd) or box
+        print(f"  capture region re-measured: {box}", flush=True)
+
+        # The reference every later frame is checked against.
+        ref_mean = float(np.asarray(
+            ImageGrab.grab(bbox=box, all_screens=True).convert("L"),
+            dtype=np.float32).mean())
+        occluded = 0
 
         for ep in range(episodes):
             states = env.reset(train_mode=True)
@@ -277,29 +357,53 @@ def record_gif(
                 ep_scores += rewards
                 done = bool(dones.any())
                 if i % every == 0:
-                    # Re-check every single frame. Focus can be stolen mid-run
-                    # by anything that pops up, and the frames captured after
-                    # that point would be of someone else's window.
-                    # Never capture while another window is in front. But a
-                    # transient focus change should pause the recording, not
-                    # destroy it -- the episode keeps running either way, so we
-                    # simply skip frames until the window comes back.
-                    if not is_foreground(hwnd):
+                    # Follow the window rather than trusting a startup
+                    # measurement: it demonstrably moves after launch.
+                    live = client_box(hwnd)
+                    if live is None:
+                        raise RuntimeError(
+                            f"The Tennis window disappeared after {len(frames)} "
+                            "frames. Nothing is written."
+                        )
+                    box = live
+                    img = ImageGrab.grab(bbox=box, all_screens=True)
+
+                    # Gate on the pixels, not on the window manager.
+                    #
+                    # The focus test (GetForegroundWindow, by handle and then by
+                    # process) kept reporting a loss while the player was
+                    # plainly in front, and rejected every frame. Whatever takes
+                    # focus back on this machine, the property actually worth
+                    # enforcing is "these pixels are the scene we measured
+                    # during warm-up" -- which is what protects against
+                    # publishing somebody's editor, and is checkable directly.
+                    #
+                    # The scene's global brightness is stable because the court
+                    # is a static background; only the ball and rackets move. A
+                    # different window covering the region moves it far outside
+                    # this band.
+                    probe = float(np.asarray(img.convert("L"), dtype=np.float32).mean())
+                    if abs(probe - ref_mean) > OCCLUSION_TOLERANCE:
+                        occluded += 1
                         if not _paused_notice[0]:
-                            print("\n  focus lost - pausing capture, click the "
-                                  "Reacher window to resume", flush=True)
+                            print(f"\n  frame does not match the scene "
+                                  f"(brightness {probe:.0f} vs {ref_mean:.0f}) - "
+                                  "something is covering the window; pausing",
+                                  flush=True)
                             _paused_notice[0] = True
-                        if not _wait_for_foreground(hwnd, timeout=30.0):
+                        if occluded > MAX_OCCLUDED:
                             raise RuntimeError(
-                                f"Focus did not return within 30s ({len(frames)} "
-                                "frames captured). Nothing is written. Re-run and "
-                                "leave the Tennis window in front."
+                                f"{occluded} consecutive frames did not match the "
+                                f"scene ({len(frames)} captured). Nothing is "
+                                "written -- refusing to film whatever is covering "
+                                "the Tennis window."
                             )
-                        _paused_notice[0] = False
-                        print("  focus regained, resuming capture", flush=True)
                         i += 1
                         continue
-                    img = ImageGrab.grab(bbox=box, all_screens=True)
+                    if _paused_notice[0]:
+                        print("  scene visible again, resuming capture", flush=True)
+                        _paused_notice[0] = False
+                    occluded = 0
                     if scale != 1.0:
                         img = img.resize(
                             (int(img.width * scale), int(img.height * scale)),
