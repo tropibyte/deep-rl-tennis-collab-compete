@@ -181,6 +181,11 @@ in `train.py`.
 scores **2.12 ± 1.01** over five evaluation episodes with exploration off —
 against a random-policy floor of 0.0154 and a target of +0.5.
 
+![Trained agents](assets/trained_agents.gif)
+
+*The trained policy rallying with exploration off. One actor drives both
+rackets — it was trained by self-play, so the two sides are the same network.*
+
 ![Learning curve](assets/learning_curve.png)
 
 Rally length is the mechanism: the reward pays for keeping the ball in play, so
