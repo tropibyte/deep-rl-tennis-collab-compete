@@ -167,6 +167,7 @@ scripts/         random_baseline, bench_env, run_study, analyze,
                  diagnose, salvage, make_configs
 vendor/          modernised ML-Agents v0.4 client
 tests/           unit tests
+Tennis.ipynb     guided tour of the environment and the trained agents
 ```
 
 Most of this is inherited from the
