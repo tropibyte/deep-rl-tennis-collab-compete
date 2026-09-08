@@ -176,6 +176,21 @@ in `train.py`.
 
 ## Results
 
+**Solved in 355 episodes**, on all three seeds (355, 365, 998). The saved policy
+scores **2.12 ± 1.01** over five evaluation episodes with exploration off —
+against a random-policy floor of 0.0154 and a target of +0.5.
+
+![Learning curve](assets/learning_curve.png)
+
+Rally length is the mechanism: the reward pays for keeping the ball in play, so
+the score and the rally are the same fact seen twice. A random policy sustains
+17.4 steps; the trained agents sustain over 900.
+
+![Rally length](assets/rally_length.png)
+
+That is also why the task gets *more expensive as it succeeds* — 0.14 s per
+episode early, 24.4 s after solving, a 170-fold increase.
+
 See **[Report.md](Report.md)** for the learning algorithm, hyperparameters,
 network architectures, the plot of rewards, the number of episodes needed to
 solve, and ideas for future work.

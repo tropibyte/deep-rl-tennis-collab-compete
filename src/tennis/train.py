@@ -108,7 +108,10 @@ def train(
                     f"(reported as episode {solved_episode})"
                 )
 
-        if verbose and (episode % 10 == 0 or window_full):
+        # Every episode, not every tenth: the log is the only record a run
+        # stopped early leaves behind, and a sparse prefix misaligns the
+        # reconstructed curve against its episode numbers.
+        if verbose:
             elapsed = time.perf_counter() - t_start
             print(
                 f"  ep {episode:>5}/{cfg.episodes}  score {score:>6.3f}  "
