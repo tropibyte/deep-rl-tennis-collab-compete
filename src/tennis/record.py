@@ -34,8 +34,12 @@ TOAST_ZONE_PX = 480
 # during warm-up before it is treated as something other than the scene.
 # The court is a static background, so the honest variation is small.
 OCCLUSION_TOLERANCE = 18.0
-# Consecutive non-matching frames tolerated before giving up entirely.
-MAX_OCCLUDED = 40
+# Frames tolerated that do not match the scene. Generous: the player can be
+# slow to render, and giving up early is what wasted several attempts.
+MAX_OCCLUDED = 250
+# Mean per-pixel change between consecutive grabs that counts as a live,
+# animating render rather than a static window sitting in the region.
+MOTION_THRESHOLD = 0.35
 
 
 def _time_left(deadline: float) -> float:
@@ -314,38 +318,61 @@ def record_gif(
             )
         print(f"capturing region {box} (window confirmed foreground)")
 
-        # Owning the foreground is not the same as having painted. A window that
-        # exists but has not yet rendered lets a screen grab pick up whatever is
-        # behind it, which is how the first 17 frames of an otherwise clean
-        # recording came back showing another application. Wait, then discard
-        # grabs until the content stops changing wildly.
+        # Owning the foreground is not the same as having painted, and on this
+        # machine the player can take a long time to put anything on screen. A
+        # brightness-only warm-up gave up while the window was still showing
+        # what was behind it, and then used *that* as the reference -- so the
+        # check was measuring the wrong thing against the wrong baseline.
+        #
+        # Wait for MOTION instead. The environment is being stepped, so a live
+        # render changes between consecutive grabs while a static window
+        # underneath does not. Motion is the one signal a stale or occluded
+        # capture cannot produce.
         time.sleep(warmup_sec)
-        prev_mean = None
-        for _ in range(40):
+        print("  waiting for the scene to start rendering...", flush=True)
+
+        def grab_gray():
+            nonlocal box
             box = client_box(hwnd) or box
-            probe = np.asarray(ImageGrab.grab(bbox=box, all_screens=True).convert("L"),
-                               dtype=np.float32)
-            m = float(probe.mean())
-            # A near-black grab is the splash screen or an unpainted surface.
-            if m > 10.0 and prev_mean is not None and abs(m - prev_mean) < 2.0:
-                break
-            prev_mean = m
-            time.sleep(0.25)
-        print(f"  warm-up complete (scene brightness {prev_mean:.0f})")
-        # Say clearly when the quiet period starts and roughly how long it runs.
-        # A silent warm-up looks finished, and the window gets clicked away.
+            return np.asarray(
+                ImageGrab.grab(bbox=box, all_screens=True).convert("L"),
+                dtype=np.float32)
+
+        states = env.reset(train_mode=True)
+        prev = grab_gray()
+        moving_streak = 0
+        live = False
+        for attempt in range(400):          # up to ~2 minutes of patience
+            actions = agent.act(states, add_noise=False)
+            states, _, dones, _ = env.step(actions)
+            if dones.any():
+                states = env.reset(train_mode=True)
+            cur = grab_gray()
+            if cur.shape == prev.shape:
+                delta = float(np.abs(cur - prev).mean())
+                moving_streak = moving_streak + 1 if delta > MOTION_THRESHOLD else 0
+                if moving_streak >= 3:
+                    live = True
+                    print(f"  scene is live (frame-to-frame change {delta:.2f}) "
+                          f"after {attempt + 1} probes", flush=True)
+                    break
+            prev = cur
+            time.sleep(0.05)
+
+        if not live:
+            raise RuntimeError(
+                "The capture region never showed a moving picture, so it is not "
+                "the Tennis render -- it is whatever is sitting in that part of "
+                "the screen. Nothing was written."
+            )
+
+        box = client_box(hwnd) or box
+        ref_mean = float(grab_gray().mean())
+        occluded = 0
+        print(f"  capture region {box}, scene brightness {ref_mean:.0f}")
         print("")
         print("  >>> RECORDING NOW - do not click anything until this finishes <<<")
         print("      (about 60-90 seconds; it will say when it is done)", flush=True)
-
-        box = client_box(hwnd) or box
-        print(f"  capture region re-measured: {box}", flush=True)
-
-        # The reference every later frame is checked against.
-        ref_mean = float(np.asarray(
-            ImageGrab.grab(bbox=box, all_screens=True).convert("L"),
-            dtype=np.float32).mean())
-        occluded = 0
 
         for ep in range(episodes):
             states = env.reset(train_mode=True)
